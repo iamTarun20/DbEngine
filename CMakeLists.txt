@@ -8,4 +8,6 @@ include_directories(.)
 add_executable(DbEngine
         disk_manager.cpp
         disk_manager.h
-        main.cpp)
+        main.cpp
+        slottedpage.cpp
+        slottedpage.h)
