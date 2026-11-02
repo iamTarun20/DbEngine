@@ -1,70 +1,58 @@
-// src/buffer/buffer_pool_manager.cpp
-#include "buffer/buffer_pool_manager.h" // .h use kiya hai
-
+#include "buffer/buffer_pool_manager.h"
+#include <stdexcept>
 namespace dbengine {
-
-BufferPoolManager::BufferPoolManager(DiskManager* disk_manager)
-    : disk_manager_(disk_manager) {}
-
-int BufferPoolManager::FindFreeOrEvictFrame() {
-    for (int i = 0; i < POOL_SIZE; i++) {
+BufferPoolManager::BufferPoolManager(DiskManager* disk_manager) : disk_manager_(disk_manager) {
+    if (!disk_manager_) throw std::invalid_argument("Disk manager is required");
+}
+int BufferPoolManager::FindFreeOrEvictFrame() const {
+    int victim = -1;
+    for (int i = 0; i < POOL_SIZE; ++i) {
         if (pages_[i].page_id_ == -1) return i;
+        if (pages_[i].pin_count_ == 0 && (victim == -1 || last_used_[i] < last_used_[victim])) victim = i;
     }
-
-    for (int i = 0; i < POOL_SIZE; i++) {
-        if (pages_[i].pin_count_ == 0) {
-            page_table_.erase(pages_[i].page_id_);
-            return i;
-        }
-    }
-    return -1;
+    return victim;
 }
-
 Page* BufferPoolManager::FetchPage(page_id_t page_id) {
-    if (page_table_.find(page_id) != page_table_.end()) {
-        int frame_id = page_table_[page_id];
-        pages_[frame_id].pin_count_++;
-        std::cout << "[BPM] Cache Hit! Page " << page_id << " RAM me mil gaya.\n";
-        return &pages_[frame_id];
+    if (page_id < 0) throw std::invalid_argument("Invalid page ID");
+    auto found = page_table_.find(page_id);
+    if (found != page_table_.end()) {
+        Page& page = pages_[found->second];
+        ++page.pin_count_;
+        last_used_[found->second] = ++clock_;
+        return &page;
     }
-
-    int target_frame = FindFreeOrEvictFrame();
-    if (target_frame == -1) {
-        std::cout << "[BPM] Error: Sabhi pages pinned hain!\n";
-        return nullptr;
-    }
-
-    if (pages_[target_frame].is_dirty_) {
-        std::cout << "[BPM] Saving Dirty Page " << pages_[target_frame].page_id_ << " to Disk...\n";
-        disk_manager_->WritePage(pages_[target_frame].page_id_, pages_[target_frame].data_.GetRawData());
-    }
-
-    std::cout << "[BPM] Fetching Page " << page_id << " from Disk...\n";
-    pages_[target_frame].ResetMemory();
-
-    disk_manager_->ReadPage(page_id, const_cast<char*>(pages_[target_frame].data_.GetRawData()));
-
-    pages_[target_frame].page_id_ = page_id;
-    pages_[target_frame].pin_count_ = 1;
-    pages_[target_frame].is_dirty_ = false;
-
-    page_table_[page_id] = target_frame;
-
-    return &pages_[target_frame];
+    const int frame = FindFreeOrEvictFrame();
+    if (frame == -1) return nullptr;
+    Page& page = pages_[frame];
+    // Read first so an I/O or validation error cannot discard the old frame.
+    SlottedPage incoming;
+    if (disk_manager_->ReadPage(page_id, incoming.GetRawData()) && !incoming.IsValid())
+        throw std::runtime_error("Invalid or corrupted database page");
+    if (page.is_dirty_) disk_manager_->WritePage(page.page_id_, page.data_.GetRawData());
+    if (page.page_id_ != -1) page_table_.erase(page.page_id_);
+    page.ResetMemory();
+    page.data_ = incoming;
+    page.page_id_ = page_id;
+    page.pin_count_ = 1;
+    page_table_[page_id] = frame;
+    last_used_[frame] = ++clock_;
+    return &page;
 }
-
-void BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty) {
-    if (page_table_.find(page_id) != page_table_.end()) {
-        int frame_id = page_table_[page_id];
-
-        if (is_dirty) {
-            pages_[frame_id].is_dirty_ = true;
-        }
-
-        if (pages_[frame_id].pin_count_ > 0) {
-            pages_[frame_id].pin_count_--;
+bool BufferPoolManager::UnpinPage(page_id_t page_id, bool is_dirty) {
+    auto found = page_table_.find(page_id);
+    if (found == page_table_.end() || pages_[found->second].pin_count_ == 0) return false;
+    Page& page = pages_[found->second];
+    page.is_dirty_ = page.is_dirty_ || is_dirty;
+    --page.pin_count_;
+    last_used_[found->second] = ++clock_;
+    return true;
+}
+void BufferPoolManager::FlushAllPages() {
+    for (Page& page : pages_) {
+        if (page.page_id_ != -1 && page.is_dirty_) {
+            disk_manager_->WritePage(page.page_id_, page.data_.GetRawData());
+            page.is_dirty_ = false;
         }
     }
 }
-
-} // namespace dbengine
+}

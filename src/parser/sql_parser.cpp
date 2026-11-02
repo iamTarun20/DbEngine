@@ -1,57 +1,21 @@
-// src/parser/sql_parser.cpp
 #include "parser/sql_parser.h"
-#include <sstream>
-
+#include <algorithm>
+#include <cctype>
+#include <regex>
 namespace dbengine {
-
-    std::vector<std::string> SQLParser::Tokenize(const std::string& query) {
-        std::vector<std::string> tokens;
-        std::stringstream ss(query);
-        std::string word;
-
-        // Space ke basis pe string ko words me todna
-        while (ss >> word) {
-            tokens.push_back(word);
-        }
-        return tokens;
-    }
-
-    SQLStatement SQLParser::ParseQuery(const std::string& query) {
-        SQLStatement stmt;
-        std::vector<std::string> tokens = Tokenize(query);
-
-        if (tokens.empty()) return stmt;
-
-        // 1. SELECT Query parse karna
-        // Example: SELECT * FROM student
-        if (tokens[0] == "SELECT" || tokens[0] == "select") {
-            stmt.type = StatementType::SELECT;
-
-            // Basic check for table name
-            for (size_t i = 0; i < tokens.size(); i++) {
-                if ((tokens[i] == "FROM" || tokens[i] == "from") && i + 1 < tokens.size()) {
-                    stmt.table_name = tokens[i + 1];
-                    break;
-                }
-            }
-        }
-        // 2. INSERT Query parse karna
-        // Example: INSERT INTO student VALUES Tarun_Kumar_IT_Branch
-        else if (tokens[0] == "INSERT" || tokens[0] == "insert") {
-            stmt.type = StatementType::INSERT;
-
-            for (size_t i = 0; i < tokens.size(); i++) {
-                if ((tokens[i] == "INTO" || tokens[i] == "into") && i + 1 < tokens.size()) {
-                    stmt.table_name = tokens[i + 1];
-                }
-                if ((tokens[i] == "VALUES" || tokens[i] == "values") && i + 1 < tokens.size()) {
-                    stmt.record_data = tokens[i + 1];
-                    // Note: Abhi hum single string as value le rahe hain simplicity ke liye
-                }
-            }
-        }
-
-        return stmt;
-    }
-
-} // namespace dbengine
+SQLStatement SQLParser::ParseQuery(const std::string& query) {
+    static const std::regex select_pattern(R"(^\s*SELECT\s+\*\s+FROM\s+([A-Za-z_][A-Za-z0-9_]*)\s*;?\s*$)", std::regex::icase);
+    static const std::regex insert_pattern(R"(^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)\s+VALUES\s+(?:'([^']*)'|([^\s;']+))\s*;?\s*$)", std::regex::icase);
+    std::smatch match;
+    SQLStatement statement;
+    if (std::regex_match(query, match, select_pattern)) statement.type = StatementType::SELECT;
+    else if (std::regex_match(query, match, insert_pattern)) {
+        statement.type = StatementType::INSERT;
+        statement.record_data = match[2].matched ? match[2].str() : match[3].str();
+    } else return statement;
+    statement.table_name = match[1];
+    std::transform(statement.table_name.begin(), statement.table_name.end(), statement.table_name.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return statement;
+}
+}

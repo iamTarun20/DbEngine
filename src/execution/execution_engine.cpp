@@ -1,51 +1,32 @@
-// src/execution/execution_engine.cpp
 #include "execution/execution_engine.h"
-
+#include <iostream>
+#include <stdexcept>
 namespace dbengine {
-
-    ExecutionEngine::ExecutionEngine(BufferPoolManager* bpm) : bpm_(bpm) {}
-
-    void ExecutionEngine::Execute(const SQLStatement& stmt) {
-        // 1. SELECT LOGIC
-        if (stmt.type == StatementType::SELECT) {
-            // Buffer Pool se table ka page mangwao
-            Page* page = bpm_->FetchPage(0);
-            if (page != nullptr) {
-                int count = page->data_.GetRecordCount();
-                std::cout << "--> [Executor] Fetching data from table '" << stmt.table_name << "'\n";
-                std::cout << "----------------------------------------\n";
-
-                for (int i = 0; i < count; i++) {
-                    std::cout << " Row " << i << ": " << page->data_.GetRecord(i) << "\n";
-                }
-
-                std::cout << "----------------------------------------\n";
-                std::cout << "--> [Success] " << count << " rows returned.\n\n";
-
-                // Padhne ke baad page wapas rakh do (Dirty = false)
-                bpm_->UnpinPage(0, false);
-            } else {
-                std::cout << "--> [Error] Failed to fetch page from disk.\n\n";
-            }
-        }
-        // 2. INSERT LOGIC
-        else if (stmt.type == StatementType::INSERT) {
-            // Buffer Pool se page mangwao
-            Page* page = bpm_->FetchPage(0);
-            if (page != nullptr) {
-                // Data page me insert karo
-                bool success = page->data_.InsertRecord(stmt.record_data);
-
-                if (success) {
-                    std::cout << "--> [Success] 1 row inserted into '" << stmt.table_name << "'.\n\n";
-                    // Likhne ke baad page wapas rakho (Dirty = true, taaki disk pe save ho)
-                    bpm_->UnpinPage(0, true);
-                } else {
-                    std::cout << "--> [Error] Page is full! Need a new page.\n\n";
-                    bpm_->UnpinPage(0, false);
-                }
-            }
-        }
+ExecutionEngine::ExecutionEngine(BufferPoolManager* buffer_pool) : buffer_pool_(buffer_pool) {
+    if (!buffer_pool_) throw std::invalid_argument("Buffer pool is required");
+}
+void ExecutionEngine::Execute(const SQLStatement& statement) {
+    if (statement.type == StatementType::INVALID || statement.table_name.empty()) {
+        std::cout << "Invalid statement.\n"; return;
     }
-
-} // namespace dbengine
+    Page* page = buffer_pool_->FetchPage(0);
+    if (!page) { std::cout << "No buffer frame available.\n"; return; }
+    // A table name and a tab prefix each record. Names are validated by the parser.
+    const std::string prefix = statement.table_name + "\t";
+    if (statement.type == StatementType::INSERT) {
+        const bool inserted = page->data_.InsertRecord(prefix + statement.record_data);
+        buffer_pool_->UnpinPage(0, inserted);
+        std::cout << (inserted ? "1 row inserted.\n" : "Page is full; row not inserted.\n");
+    } else {
+        int count = 0;
+        for (uint16_t slot = 0; slot < page->data_.GetRecordCount(); ++slot) {
+            const std::string record = page->data_.GetRecord(slot);
+            if (record.compare(0, prefix.size(), prefix) == 0) {
+                std::cout << record.substr(prefix.size()) << '\n'; ++count;
+            }
+        }
+        buffer_pool_->UnpinPage(0, false);
+        std::cout << count << " row(s) returned.\n";
+    }
+}
+}

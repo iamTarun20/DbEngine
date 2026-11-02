@@ -1,76 +1,36 @@
-// src/index/b_plus_tree_node.cpp
 #include "index/b_plus_tree_node.h"
-
+#include <stdexcept>
 namespace dbengine {
-
-    BPlusTreeNode::BPlusTreeNode(bool is_leaf, int max_size)
-        : is_leaf_(is_leaf), size_(0), max_size_(max_size), next_page_id_(-1) {}
-
-    bool BPlusTreeNode::IsLeaf() const { return is_leaf_; }
-    int BPlusTreeNode::GetSize() const { return size_; }
-
-    int BPlusTreeNode::FindValue(int search_key) const {
-        int left = 0;
-        int right = size_ - 1;
-
-        while (left <= right) {
-            int mid = left + (right - left) / 2;
-
-            if (keys_[mid] == search_key) {
-                return values_[mid];
-            } else if (keys_[mid] < search_key) {
-                left = mid + 1;
-            } else {
-                right = mid - 1;
-            }
-        }
-        return -1;
+BPlusTreeNode::BPlusTreeNode(bool is_leaf, int max_size)
+    : is_leaf_(is_leaf), size_(0), max_size_(max_size), next_page_id_(-1) {
+    if (max_size < 2 || max_size > 200) throw std::invalid_argument("Node capacity must be between 2 and 200");
+}
+bool BPlusTreeNode::IsLeaf() const { return is_leaf_; }
+int BPlusTreeNode::GetSize() const { return size_; }
+int BPlusTreeNode::FindValue(int key) const {
+    int left = 0, right = size_;
+    while (left < right) {
+        const int middle = left + (right - left) / 2;
+        if (keys_[middle] < key) left = middle + 1; else right = middle;
     }
-
-    bool BPlusTreeNode::Insert(int key, int value) {
-        if (size_ >= max_size_) {
-            return false;
-        }
-
-        int insert_index = 0;
-        while (insert_index < size_ && keys_[insert_index] < key) {
-            insert_index++;
-        }
-
-        for (int i = size_; i > insert_index; i--) {
-            keys_[i] = keys_[i - 1];
-            values_[i] = values_[i - 1];
-        }
-
-        keys_[insert_index] = key;
-        values_[insert_index] = value;
-        size_++;
-
-        return true;
-    }
-
-    // YEH RAHA SPLIT KA LOGIC
-    BPlusTreeNode* BPlusTreeNode::Split(int& out_promoted_key) {
-        BPlusTreeNode* new_sibling = new BPlusTreeNode(this->is_leaf_, this->max_size_);
-
-        int mid_index = this->size_ / 2;
-        out_promoted_key = this->keys_[mid_index];
-
-        int j = 0;
-        for (int i = mid_index; i < this->size_; i++) {
-            new_sibling->keys_[j] = this->keys_[i];
-            new_sibling->values_[j] = this->values_[i];
-            j++;
-        }
-
-        new_sibling->size_ = j;
-        this->size_ = mid_index;
-
-        if (this->is_leaf_) {
-            new_sibling->next_page_id_ = this->next_page_id_;
-        }
-
-        return new_sibling;
-    }
-
-} // namespace dbengine
+    return left < size_ && keys_[left] == key ? values_[left] : -1;
+}
+bool BPlusTreeNode::Insert(int key, int value) {
+    int position = 0;
+    while (position < size_ && keys_[position] < key) ++position;
+    if (size_ == max_size_ || (position < size_ && keys_[position] == key)) return false;
+    for (int i = size_; i > position; --i) { keys_[i] = keys_[i - 1]; values_[i] = values_[i - 1]; }
+    keys_[position] = key; values_[position] = value; ++size_;
+    return true;
+}
+BPlusTreeNode* BPlusTreeNode::Split(int& promoted_key) {
+    if (!is_leaf_ || size_ < 2) throw std::logic_error("Only non-empty leaf nodes can be split");
+    auto* sibling = new BPlusTreeNode(true, max_size_);
+    const int middle = size_ / 2;
+    promoted_key = keys_[middle];
+    for (int i = middle; i < size_; ++i) sibling->Insert(keys_[i], values_[i]);
+    size_ = middle;
+    sibling->next_page_id_ = next_page_id_;
+    return sibling;
+}
+}
