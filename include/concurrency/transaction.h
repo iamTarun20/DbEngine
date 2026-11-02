@@ -1,27 +1,14 @@
-// include/concurrency/transaction.h
 #pragma once
-
 namespace dbengine {
-
-    // Ek query kis halat me hai?
-    enum class TxnState {
-        GROWING,    // Taale ikkathe kar raha hai
-        SHRINKING,  // Taale khol raha hai
-        COMMITTED,  // Kaam success ho gaya
-        ABORTED     // Fail ho gaya (Rollback)
-    };
-
-    class Transaction {
-    private:
-        int txn_id_;
-        TxnState state_;
-
-    public:
-        Transaction(int id) : txn_id_(id), state_(TxnState::GROWING) {}
-
-        int GetId() const { return txn_id_; }
-        TxnState GetState() const { return state_; }
-        void SetState(TxnState state) { state_ = state; }
-    };
-
-} // namespace dbengine
+// States used by the standalone lock example. Rollback is not implemented.
+enum class TxnState { GROWING, SHRINKING, COMMITTED, ABORTED };
+class Transaction {
+    int transaction_id_;
+    TxnState state_ = TxnState::GROWING;
+public:
+    explicit Transaction(int id) : transaction_id_(id) {}
+    int GetId() const { return transaction_id_; }
+    TxnState GetState() const { return state_; }
+    void SetState(TxnState state) { state_ = state; }
+};
+}
