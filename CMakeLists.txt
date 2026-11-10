@@ -15,3 +15,10 @@ enable_testing()
 add_executable(dbengine_tests tests/dbengine_tests.cpp)
 target_link_libraries(dbengine_tests PRIVATE dbengine)
 add_test(NAME dbengine_tests COMMAND dbengine_tests)
+
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME dbengine_demo
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/demo.py"
+                "$<TARGET_FILE:DbEngine>")
+endif()
